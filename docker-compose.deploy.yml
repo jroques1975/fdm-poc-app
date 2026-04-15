@@ -1,0 +1,13 @@
+services:
+  app:
+    image: ${IMAGE:-ghcr.io/jroques1975/fdm-poc-app:latest}
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3000:3000"
+    env_file:
+      - /opt/apps/poc-app/env/.env
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

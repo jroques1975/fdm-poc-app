@@ -1,51 +1,117 @@
-name: CI
+name: CI/CD
 
 on:
   push:
-    branches: [main, develop]
-  pull_request:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Image tag to promote (e.g. sha-abc1234)"
+        required: true
+      environment:
+        description: "Target environment"
+        required: true
+        type: choice
+        options: [qa, prod]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE: ghcr.io/${{ github.repository_owner }}/fdm-poc-app
 
 jobs:
+  # ── Build & push (runs on push to main) ────────────────────────────────────
   build:
+    name: Build & push image
     runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    permissions:
+      contents: read
+      packages: write
+
+    outputs:
+      tag: ${{ steps.meta.outputs.version }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
         with:
-          node-version: "20"
-          cache: "npm"
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Type check
-        run: npx tsc --noEmit
-
-      - name: Build
-        run: npm run build
-
-  docker:
-    runs-on: ubuntu-latest
-    needs: build
-    if: github.ref == 'refs/heads/main'
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=sha,prefix=sha-,format=short
+            type=raw,value=latest
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build Docker image
+      - name: Build and push
         uses: docker/build-push-action@v5
         with:
           context: .
-          push: false
-          tags: fdm-poc-app:latest
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # ── Deploy to Dev (auto, after build) ──────────────────────────────────────
+  deploy-dev:
+    name: Deploy to Dev
+    runs-on: ubuntu-latest
+    needs: build
+    environment: dev
+
+    steps:
+      - name: Deploy to lab-dev via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.DEV_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            IMAGE="ghcr.io/${{ github.repository_owner }}/fdm-poc-app:${{ needs.build.outputs.tag }}"
+            cd /opt/apps/poc-app
+            echo "IMAGE_TAG=${{ needs.build.outputs.tag }}" > current/.deploy
+            docker pull $IMAGE
+            IMAGE=$IMAGE docker compose -f current/docker-compose.yml --env-file env/.env up -d --force-recreate
+            docker image prune -f
+
+  # ── Promote to QA or Prod (manual workflow_dispatch) ───────────────────────
+  promote:
+    name: Promote ${{ inputs.tag }} to ${{ inputs.environment }}
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+
+    steps:
+      - name: Set target host
+        id: target
+        run: |
+          if [ "${{ inputs.environment }}" = "qa" ]; then
+            echo "host=${{ secrets.QA_HOST }}" >> $GITHUB_OUTPUT
+          else
+            echo "host=${{ secrets.PROD_HOST }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ steps.target.outputs.host }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            IMAGE="ghcr.io/${{ github.repository_owner }}/fdm-poc-app:${{ inputs.tag }}"
+            cd /opt/apps/poc-app
+            echo "IMAGE_TAG=${{ inputs.tag }}" > current/.deploy
+            docker pull $IMAGE
+            IMAGE=$IMAGE docker compose -f current/docker-compose.yml --env-file env/.env up -d --force-recreate
+            docker image prune -f
