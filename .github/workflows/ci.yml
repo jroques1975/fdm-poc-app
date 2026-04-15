@@ -83,7 +83,7 @@ jobs:
             cd /opt/apps/poc-app
             echo "IMAGE_TAG=${{ needs.build.outputs.tag }}" > current/.deploy
             docker pull $IMAGE
-            IMAGE=$IMAGE docker compose -f current/docker-compose.yml --env-file env/.env up -d --force-recreate
+            IMAGE=$IMAGE docker compose -f current/docker-compose.dev.yml --env-file env/.env up -d --force-recreate
             docker image prune -f
 
   # ── Promote to QA or Prod (manual workflow_dispatch) ───────────────────────
