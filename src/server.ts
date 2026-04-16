@@ -12,6 +12,36 @@ const db = new Pool({
   password: process.env.DB_PASSWORD,
 });
 
+app.get('/', async (_, reply) => {
+  reply.type('text/html');
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FDM PoC App</title>
+  <style>
+    body { font-family: sans-serif; max-width: 600px; margin: 80px auto; padding: 0 20px; color: #333; }
+    h1 { font-size: 1.8rem; margin-bottom: 0.25rem; }
+    p  { color: #666; margin-top: 0; }
+    ul { list-style: none; padding: 0; margin-top: 2rem; }
+    li { margin: 0.75rem 0; }
+    a  { display: inline-block; padding: 0.5rem 1rem; background: #0070f3; color: #fff;
+         text-decoration: none; border-radius: 6px; font-size: 0.95rem; }
+    a:hover { background: #005bb5; }
+  </style>
+</head>
+<body>
+  <h1>FDM PoC App</h1>
+  <p>Fastify + TypeScript + PostgreSQL</p>
+  <ul>
+    <li><a href="/health">/health</a></li>
+    <li><a href="/db-check">/db-check</a></li>
+  </ul>
+</body>
+</html>`;
+});
+
 app.get('/health', async () => {
   return {
     status: 'ok',
